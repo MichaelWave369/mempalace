@@ -1442,13 +1442,9 @@ def tool_update_drawer(
                 new_meta["room"] = sanitize_name(room, "room")
             except ValueError as e:
                 return {"success": False, "error": str(e)}
-        if updated_by is not None:
-            try:
-                updated_by = sanitize_name(updated_by, "updated_by")
-            except ValueError as e:
-                return {"success": False, "error": str(e)}
-            new_meta["updated_by"] = updated_by
-
+       if updated_by is not None:
+    updated_by = strip_lone_surrogates(updated_by)
+    new_meta["updated_by"] = updated_by
         wal_params = {
             "drawer_id": drawer_id,
             "old_wing": old_meta.get("wing", ""),
