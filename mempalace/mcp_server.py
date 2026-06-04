@@ -1446,7 +1446,7 @@ def tool_update_drawer(
            updated_by = strip_lone_surrogates(updated_by)
            new_meta["updated_by"] = updated_by
         
-        wal_params = {
+       wal_params = {
             "drawer_id": drawer_id,
             "old_wing": old_meta.get("wing", ""),
             "old_room": old_meta.get("room", ""),
