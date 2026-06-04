@@ -1372,14 +1372,14 @@ class TestWriteTools:
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_update_drawer
 
-        result = tool_update_drawer("drawer_proj_backend_aaa", updated_by="claude")
+        result = tool_update_drawer("drawer_proj_backend_aaa", updated_by="user@example.com")
         assert result["success"] is True
 
         fetched = seeded_collection.get(
             ids=["drawer_proj_backend_aaa"], include=["metadatas"]
         )
         metadata = fetched["metadatas"][0]
-        assert metadata["updated_by"] == "claude"
+        assert metadata["updated_by"] == "user@example.com"
         assert metadata["added_by"] == "miner"
 
     def test_update_drawer_with_updated_by_includes_editor_in_wal_params(
@@ -1395,7 +1395,7 @@ class TestWriteTools:
             lambda operation, params, result=None: wal_calls.append((operation, params, result)),
         )
 
-        result = mcp_server.tool_update_drawer("drawer_proj_backend_aaa", updated_by="claude")
+        result = mcp_server.tool_update_drawer("drawer_proj_backend_aaa", updated_by="user@example.com")
         assert result["success"] is True
 
         assert wal_calls == [
@@ -1409,7 +1409,7 @@ class TestWriteTools:
                     "new_room": "backend",
                     "content_changed": False,
                     "content_preview": None,
-                    "updated_by": "claude",
+                    "updated_by": "user@example.com",
                 },
                 None,
             )
