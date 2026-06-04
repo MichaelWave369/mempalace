@@ -26,6 +26,23 @@ claude mcp add mempalace -- python -m mempalace.mcp_server --palace /path/to/pal
 codex mcp add mempalace -- python -m mempalace.mcp_server --palace /path/to/palace
 ```
 
+### Remote stdio lifecycle notes
+
+When MemPalace runs through stdio, each client connection normally owns its own
+MCP server process. In local desktop use this is usually invisible. In remote
+deployments, wrappers such as SSH, `docker exec`, Codex bridges, Claude Code
+sessions, or subagents can make it more visible: every long-lived client/session
+may keep a separate `python -m mempalace.mcp_server` process and wrapper process
+alive.
+
+If a remote host appears to consume more memory over time, first check for
+accumulated client sessions or stale wrapper processes before assuming a
+single-process memory leak. This is especially relevant for long-lived or
+resumed agent sessions.
+
+For SSH/docker setups, prefer explicit session cleanup, restart stale bridges
+when finished, and periodically inspect the remote process list.
+
 Now your AI has all 29 tools available. Ask it anything:
 
 > *"What did we decide about auth last month?"*
