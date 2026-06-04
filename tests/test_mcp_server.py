@@ -1366,6 +1366,81 @@ class TestWriteTools:
         assert result["success"] is True
         assert result.get("noop") is True
 
+    def test_update_drawer_with_updated_by_stores_editor_metadata(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa", updated_by="user@example.com")
+        assert result["success"] is True
+
+        fetched = seeded_collection.get(
+            ids=["drawer_proj_backend_aaa"], include=["metadatas"]
+        )
+        metadata = fetched["metadatas"][0]
+        assert metadata["updated_by"] == "user@example.com"
+        assert metadata["added_by"] == "miner"
+
+    def test_update_drawer_with_updated_by_includes_editor_in_wal_params(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        wal_calls = []
+        monkeypatch.setattr(
+            mcp_server,
+            "_wal_log",
+            lambda operation, params, result=None: wal_calls.append((operation, params, result)),
+        )
+
+        result = mcp_server.tool_update_drawer("drawer_proj_backend_aaa", updated_by="user@example.com")
+        assert result["success"] is True
+
+        assert wal_calls == [
+            (
+                "update_drawer",
+                {
+                    "drawer_id": "drawer_proj_backend_aaa",
+                    "old_wing": "project",
+                    "old_room": "backend",
+                    "new_wing": "project",
+                    "new_room": "backend",
+                    "content_changed": False,
+                    "content_preview": None,
+                    "updated_by": "user@example.com",
+                },
+                None,
+            )
+        ]
+
+    def test_update_drawer_without_updated_by_does_not_add_editor_metadata_or_wal_param(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        wal_calls = []
+        monkeypatch.setattr(
+            mcp_server,
+            "_wal_log",
+            lambda operation, params, result=None: wal_calls.append((operation, params, result)),
+        )
+
+        result = mcp_server.tool_update_drawer(
+            "drawer_proj_backend_aaa", content="Updated content about auth."
+        )
+        assert result["success"] is True
+
+        fetched = seeded_collection.get(
+            ids=["drawer_proj_backend_aaa"], include=["metadatas"]
+        )
+        metadata = fetched["metadatas"][0]
+        assert "updated_by" not in metadata
+        assert metadata["added_by"] == "miner"
+        assert "updated_by" not in wal_calls[0][1]
+
     def test_tool_create_tunnel_preserves_hyphenated_wings(self, monkeypatch, tmp_path):
         """Regression for #1504: ``tool_create_tunnel`` stores the wing slug
         verbatim, and both hyphen and underscore queries find the result."""
