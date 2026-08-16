@@ -61,36 +61,17 @@ jobs:
               "update_drawer noop",
           )
 
-          room_anchor = '''            if room.lower() != str(old_meta.get("room") or "").lower():
-                  new_meta["room"] = room
-
+          wal_start = func.index("\n        _wal_log(")
+          editor_block = '''
+              if updated_by is not None:
+                  updated_by = strip_lone_surrogates(updated_by)
+                  new_meta["updated_by"] = updated_by
           '''
-          func = replace_once(
-              func,
-              room_anchor,
-              room_anchor
-              + '''        if updated_by is not None:
-              updated_by = strip_lone_surrogates(updated_by)
-              new_meta["updated_by"] = updated_by
+          func = func[:wal_start] + "\n" + editor_block + func[wal_start:]
 
-          ''',
-              "updated_by metadata insertion",
-          )
-
-          old_wal = '''        _wal_log(
-              "update_drawer",
-              {
-                  "drawer_id": drawer_id,
-                  "old_wing": old_meta.get("wing", ""),
-                  "old_room": old_meta.get("room", ""),
-                  "new_wing": new_meta.get("wing", ""),
-                  "new_room": new_meta.get("room", ""),
-                  "content_changed": content is not None,
-                  "content_preview": new_doc[:200] if content is not None else None,
-              },
-          )
-          '''
-          new_wal = '''        wal_params = {
+          wal_start = func.index("        _wal_log(")
+          wal_end = func.index("\n\n        chunk_size", wal_start)
+          wal_block = '''        wal_params = {
               "drawer_id": drawer_id,
               "old_wing": old_meta.get("wing", ""),
               "old_room": old_meta.get("room", ""),
@@ -102,9 +83,8 @@ jobs:
           if updated_by is not None:
               wal_params["updated_by"] = updated_by
 
-          _wal_log("update_drawer", wal_params)
-          '''
-          func = replace_once(func, old_wal, new_wal, "update_drawer WAL")
+          _wal_log("update_drawer", wal_params)'''
+          func = func[:wal_start] + wal_block + func[wal_end:]
           text = text[:func_start] + func + text[func_end:]
 
           schema_start = text.index('    "mempalace_update_drawer": {')
