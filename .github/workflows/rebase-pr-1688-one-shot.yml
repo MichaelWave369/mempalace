@@ -28,6 +28,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import textwrap
 
           def replace_once(text: str, old: str, new: str, label: str) -> str:
               count = text.count(old)
@@ -42,18 +43,17 @@ jobs:
           func_end = text.index("\n\n# ==================== KNOWLEDGE GRAPH", func_start)
           func = text[func_start:func_end]
 
-          func = replace_once(
-              func,
-              "def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):",
-              '''def tool_update_drawer(
-              drawer_id: str,
-              content: str = None,
-              wing: str = None,
-              room: str = None,
-              updated_by: str = None,
-          ):''',
-              "update_drawer signature",
+          old_sig = "def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):"
+          new_sig = (
+              "def tool_update_drawer(\n"
+              "    drawer_id: str,\n"
+              "    content: str = None,\n"
+              "    wing: str = None,\n"
+              "    room: str = None,\n"
+              "    updated_by: str = None,\n"
+              "):"
           )
+          func = replace_once(func, old_sig, new_sig, "update_drawer signature")
           func = replace_once(
               func,
               "    if content is None and wing is None and room is None:\n",
@@ -62,28 +62,29 @@ jobs:
           )
 
           wal_start = func.index("\n        _wal_log(")
-          editor_block = '''
-              if updated_by is not None:
-                  updated_by = strip_lone_surrogates(updated_by)
-                  new_meta["updated_by"] = updated_by
-          '''
-          func = func[:wal_start] + "\n" + editor_block + func[wal_start:]
+          editor_block = (
+              "\n        if updated_by is not None:\n"
+              "            updated_by = strip_lone_surrogates(updated_by)\n"
+              "            new_meta[\"updated_by\"] = updated_by\n"
+          )
+          func = func[:wal_start] + editor_block + func[wal_start:]
 
           wal_start = func.index("        _wal_log(")
           wal_end = func.index("\n\n        chunk_size", wal_start)
-          wal_block = '''        wal_params = {
-              "drawer_id": drawer_id,
-              "old_wing": old_meta.get("wing", ""),
-              "old_room": old_meta.get("room", ""),
-              "new_wing": new_meta.get("wing", ""),
-              "new_room": new_meta.get("room", ""),
-              "content_changed": content is not None,
-              "content_preview": new_doc[:200] if content is not None else None,
-          }
-          if updated_by is not None:
-              wal_params["updated_by"] = updated_by
-
-          _wal_log("update_drawer", wal_params)'''
+          wal_block = (
+              "        wal_params = {\n"
+              "            \"drawer_id\": drawer_id,\n"
+              "            \"old_wing\": old_meta.get(\"wing\", \"\"),\n"
+              "            \"old_room\": old_meta.get(\"room\", \"\"),\n"
+              "            \"new_wing\": new_meta.get(\"wing\", \"\"),\n"
+              "            \"new_room\": new_meta.get(\"room\", \"\"),\n"
+              "            \"content_changed\": content is not None,\n"
+              "            \"content_preview\": new_doc[:200] if content is not None else None,\n"
+              "        }\n"
+              "        if updated_by is not None:\n"
+              "            wal_params[\"updated_by\"] = updated_by\n\n"
+              "        _wal_log(\"update_drawer\", wal_params)"
+          )
           func = func[:wal_start] + wal_block + func[wal_end:]
           text = text[:func_start] + func + text[func_end:]
 
@@ -96,106 +97,98 @@ jobs:
               '        "description": "Update an existing drawer\'s content and/or metadata (wing, room, editor identity). Fetches existing drawer first; returns error if not found.",',
               "update_drawer description",
           )
-          room_prop = '''                "room": {
-                      "type": "string",
-                      "description": "New room (optional — omit to keep existing)",
-                  },
-          '''
-          schema = replace_once(
-              schema,
-              room_prop,
-              room_prop
-              + '''                "updated_by": {
-                      "type": "string",
-                      "description": "Who is editing this drawer (optional)",
-                  },
-          ''',
-              "updated_by schema",
+          schema_close = '\n            },\n            "required": ["drawer_id"],'
+          schema_insert = (
+              '\n                "updated_by": {\n'
+              '                    "type": "string",\n'
+              '                    "description": "Who is editing this drawer (optional)",\n'
+              '                },\n'
+              '            },\n'
+              '            "required": ["drawer_id"],'
           )
+          schema = replace_once(schema, schema_close, schema_insert, "updated_by schema")
           text = text[:schema_start] + schema + text[schema_end:]
           path.write_text(text, encoding="utf-8")
 
           test_path = Path("tests/test_mcp_server.py")
           tests = test_path.read_text(encoding="utf-8")
           marker = '        assert result.get("noop") is True\n'
-          addition = r'''
+          methods = textwrap.dedent(r'''
+          def test_update_drawer_with_updated_by_stores_editor_metadata(
+              self, monkeypatch, config, palace_path, seeded_collection, kg
+          ):
+              _patch_mcp_server(monkeypatch, config, kg)
+              from mempalace.mcp_server import tool_update_drawer
 
-              def test_update_drawer_with_updated_by_stores_editor_metadata(
-                  self, monkeypatch, config, palace_path, seeded_collection, kg
-              ):
-                  _patch_mcp_server(monkeypatch, config, kg)
-                  from mempalace.mcp_server import tool_update_drawer
+              result = tool_update_drawer(
+                  "drawer_proj_backend_aaa", updated_by="user@example.com"
+              )
+              assert result["success"] is True
 
-                  result = tool_update_drawer(
-                      "drawer_proj_backend_aaa", updated_by="user@example.com"
-                  )
-                  assert result["success"] is True
+              fetched = seeded_collection.get(
+                  ids=["drawer_proj_backend_aaa"], include=["metadatas"]
+              )
+              metadata = fetched["metadatas"][0]
+              assert metadata["updated_by"] == "user@example.com"
+              assert metadata["added_by"] == "miner"
 
-                  fetched = seeded_collection.get(
-                      ids=["drawer_proj_backend_aaa"], include=["metadatas"]
-                  )
-                  metadata = fetched["metadatas"][0]
-                  assert metadata["updated_by"] == "user@example.com"
-                  assert metadata["added_by"] == "miner"
+          def test_update_drawer_with_updated_by_includes_editor_in_wal_params(
+              self, monkeypatch, config, palace_path, seeded_collection, kg
+          ):
+              _patch_mcp_server(monkeypatch, config, kg)
+              from mempalace import mcp_server
 
-              def test_update_drawer_with_updated_by_includes_editor_in_wal_params(
-                  self, monkeypatch, config, palace_path, seeded_collection, kg
-              ):
-                  _patch_mcp_server(monkeypatch, config, kg)
-                  from mempalace import mcp_server
+              wal_calls = []
+              monkeypatch.setattr(
+                  mcp_server,
+                  "_wal_log",
+                  lambda operation, params, result=None: wal_calls.append(
+                      (operation, params, result)
+                  ),
+              )
+              result = mcp_server.tool_update_drawer(
+                  "drawer_proj_backend_aaa", updated_by="user@example.com"
+              )
+              assert result["success"] is True
+              assert wal_calls[0][0] == "update_drawer"
+              assert wal_calls[0][1]["updated_by"] == "user@example.com"
 
-                  wal_calls = []
-                  monkeypatch.setattr(
-                      mcp_server,
-                      "_wal_log",
-                      lambda operation, params, result=None: wal_calls.append(
-                          (operation, params, result)
-                      ),
-                  )
+          def test_update_drawer_without_updated_by_preserves_existing_behavior(
+              self, monkeypatch, config, palace_path, seeded_collection, kg
+          ):
+              _patch_mcp_server(monkeypatch, config, kg)
+              from mempalace import mcp_server
 
-                  result = mcp_server.tool_update_drawer(
-                      "drawer_proj_backend_aaa", updated_by="user@example.com"
-                  )
-                  assert result["success"] is True
-                  assert wal_calls[0][0] == "update_drawer"
-                  assert wal_calls[0][1]["updated_by"] == "user@example.com"
+              wal_calls = []
+              monkeypatch.setattr(
+                  mcp_server,
+                  "_wal_log",
+                  lambda operation, params, result=None: wal_calls.append(
+                      (operation, params, result)
+                  ),
+              )
+              result = mcp_server.tool_update_drawer(
+                  "drawer_proj_backend_aaa", content="Updated content about auth."
+              )
+              assert result["success"] is True
 
-              def test_update_drawer_without_updated_by_preserves_existing_behavior(
-                  self, monkeypatch, config, palace_path, seeded_collection, kg
-              ):
-                  _patch_mcp_server(monkeypatch, config, kg)
-                  from mempalace import mcp_server
+              fetched = seeded_collection.get(
+                  ids=["drawer_proj_backend_aaa"], include=["metadatas"]
+              )
+              metadata = fetched["metadatas"][0]
+              assert "updated_by" not in metadata
+              assert metadata["added_by"] == "miner"
+              assert "updated_by" not in wal_calls[0][1]
 
-                  wal_calls = []
-                  monkeypatch.setattr(
-                      mcp_server,
-                      "_wal_log",
-                      lambda operation, params, result=None: wal_calls.append(
-                          (operation, params, result)
-                      ),
-                  )
+          def test_update_drawer_schema_exposes_updated_by(self):
+              from mempalace import mcp_server
 
-                  result = mcp_server.tool_update_drawer(
-                      "drawer_proj_backend_aaa", content="Updated content about auth."
-                  )
-                  assert result["success"] is True
-
-                  fetched = seeded_collection.get(
-                      ids=["drawer_proj_backend_aaa"], include=["metadatas"]
-                  )
-                  metadata = fetched["metadatas"][0]
-                  assert "updated_by" not in metadata
-                  assert metadata["added_by"] == "miner"
-                  assert "updated_by" not in wal_calls[0][1]
-
-              def test_update_drawer_schema_exposes_updated_by(self):
-                  from mempalace import mcp_server
-
-                  properties = mcp_server.TOOLS["mempalace_update_drawer"]["input_schema"][
-                      "properties"
-                  ]
-                  assert properties["updated_by"]["type"] == "string"
-          '''
+              properties = mcp_server.TOOLS["mempalace_update_drawer"]["input_schema"][
+                  "properties"
+              ]
+              assert properties["updated_by"]["type"] == "string"
+          ''').strip()
+          addition = "\n\n" + textwrap.indent(methods, "    ") + "\n"
           tests = replace_once(tests, marker, marker + addition, "update_drawer tests")
           test_path.write_text(tests, encoding="utf-8")
           PY
