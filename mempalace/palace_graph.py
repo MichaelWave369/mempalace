@@ -136,7 +136,7 @@ def build_graph(col=None, config=None):
             wing = meta.get("wing", "")
             hall = meta.get("hall", "")
             date = meta.get("date", "")
-            if room and room != "general" and wing:
+            if room and wing:
                 room_data[room]["wings"].add(wing)
                 if hall:
                     room_data[room]["halls"].add(hall)
@@ -293,10 +293,19 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
 
 
 def graph_stats(col=None, config=None):
-    """Summary statistics about the palace graph."""
+    """Summary statistics about the palace graph.
+
+    ``total_rooms`` keeps its historical meaning: unique room-name nodes in
+    the passive graph. ``total_room_instances`` counts distinct (wing, room)
+    placements, which is the number users naturally compare with ``status``.
+    Explicit tunnel records are reported separately so the overview does not
+    silently omit agent-created graph connections.
+    """
     nodes, edges = build_graph(col, config)
 
-    tunnel_rooms = sum(1 for n in nodes.values() if len(n["wings"]) >= 2)
+    passive_tunnel_rooms = sum(1 for n in nodes.values() if len(n["wings"]) >= 2)
+    total_room_instances = sum(len(n["wings"]) for n in nodes.values())
+    explicit_tunnel_count = len(_load_tunnels(config))
     wing_counts = Counter()
     for data in nodes.values():
         for w in data["wings"]:
@@ -304,8 +313,12 @@ def graph_stats(col=None, config=None):
 
     return {
         "total_rooms": len(nodes),
-        "tunnel_rooms": tunnel_rooms,
+        "total_room_instances": total_room_instances,
+        "tunnel_rooms": passive_tunnel_rooms,
+        "passive_tunnel_rooms": passive_tunnel_rooms,
+        "explicit_tunnels": explicit_tunnel_count,
         "total_edges": len(edges),
+        "total_connections": len(edges) + explicit_tunnel_count,
         "rooms_per_wing": dict(wing_counts.most_common()),
         "top_tunnels": [
             {"room": r, "wings": d["wings"], "count": d["count"]}

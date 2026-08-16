@@ -111,14 +111,15 @@ class TestBuildGraph:
         assert edges[0]["wing_b"] == "wing_project"
         assert edges[0]["hall"] == "databases"
 
-    def test_general_room_excluded(self):
+    def test_general_room_included(self):
         col = _make_fake_collection(
             [
                 {"room": "general", "wing": "wing_code", "hall": "misc", "date": ""},
             ]
         )
         nodes, edges = build_graph(col=col)
-        assert "general" not in nodes
+        assert "general" in nodes
+        assert nodes["general"]["wings"] == ["wing_code"]
 
     def test_missing_wing_excluded(self):
         col = _make_fake_collection(
@@ -275,6 +276,45 @@ class TestGraphStats:
         assert stats["tunnel_rooms"] == 1
         assert stats["total_edges"] == 1
         assert "wing_code" in stats["rooms_per_wing"]
+
+    def test_stats_include_general_room_instances_and_explicit_tunnels(self):
+        # Reproduces the shape from #2260: five wings, nine (wing, room)
+        # placements, with `general` shared across three wings.
+        col = _make_fake_collection(
+            [
+                {"room": "fact", "wing": "desercion"},
+                {"room": "general", "wing": "desercion-pascual"},
+                {"room": "general", "wing": "desertion"},
+                {"room": "heatstgnn-model-selection", "wing": "desertion"},
+                {"room": "diary", "wing": "desertion"},
+                {"room": "general", "wing": "matlab-drive"},
+                {"room": "documentation", "wing": "octopus"},
+                {"room": "plans", "wing": "octopus"},
+                {"room": "controller", "wing": "octopus"},
+            ]
+        )
+
+        with patch.dict(
+            graph_stats.__globals__,
+            {"_load_tunnels": lambda config=None: [{"id": "t1"}, {"id": "t2"}]},
+        ):
+            stats = graph_stats(col=col)
+
+        assert stats["total_rooms"] == 7
+        assert stats["total_room_instances"] == 9
+        assert stats["tunnel_rooms"] == 1
+        assert stats["passive_tunnel_rooms"] == 1
+        assert stats["explicit_tunnels"] == 2
+        assert stats["total_connections"] == stats["total_edges"] + 2
+        assert set(stats["rooms_per_wing"]) == {
+            "desercion",
+            "desercion-pascual",
+            "desertion",
+            "matlab-drive",
+            "octopus",
+        }
+        assert stats["rooms_per_wing"]["desertion"] == 3
+        assert stats["rooms_per_wing"]["octopus"] == 3
 
 
 # --- _fuzzy_match ---
