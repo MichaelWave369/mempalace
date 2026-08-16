@@ -1,1 +1,0 @@
-Temporary validation trigger for PR #1688 rebase staging. This file is not part of the final PR commit.
