@@ -12,6 +12,17 @@ def run(*args):
 # Apply the reviewed #2288 rework against the current develop snapshot.
 runpy.run_path(".github/rework-2288.py", run_name="__main__")
 
+# The graph cache intentionally ignores injected collection args while warm.
+# This standalone regression switches to a fresh fake collection, so honor the
+# module's documented contract and invalidate before exercising that fixture.
+test_path = Path("tests/test_palace_graph.py")
+test_text = test_path.read_text(encoding="utf-8")
+old = "def test_2288_graph_stats_preserve_room_names_and_count_room_instances():\n    col = _make_fake_collection("
+new = "def test_2288_graph_stats_preserve_room_names_and_count_room_instances():\n    invalidate_graph_cache()\n    col = _make_fake_collection("
+if test_text.count(old) != 1:
+    raise SystemExit(f"cache regression anchor: expected one match, found {test_text.count(old)}")
+test_path.write_text(test_text.replace(old, new, 1), encoding="utf-8")
+
 feature_files = [
     "mempalace/palace_graph.py",
     "mempalace/mcp_server.py",
