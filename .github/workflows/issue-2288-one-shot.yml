@@ -1,0 +1,53 @@
+name: Validate reviewed #2288 rework
+
+on:
+  push:
+    branches:
+      - fix/graph-stats-completeness
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install project and dev dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Apply maintainer-reviewed rework
+        run: python .github/rework-2288.py
+
+      - name: Remove validation scaffolding
+        run: rm -f .github/rework-2288.py .validation-trigger-2288 .github/workflows/issue-2288-one-shot.yml
+
+      - name: Format touched files
+        run: ruff format mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
+
+      - name: Run graph suites
+        run: python -m pytest -q tests/test_palace_graph.py tests/test_palace_graph_tunnels.py
+
+      - name: Run MCP graph/tunnel fast-path tests
+        run: python -m pytest -q tests/test_mcp_server.py -k 'graph_stats or tunnel or 2288'
+
+      - name: Lint and compile
+        run: |
+          ruff check mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
+          ruff format --check mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
+          python -m compileall -q mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
+
+      - name: Commit validated feature tree
+        run: |
+          git config user.name 'MichaelWave369'
+          git config user.email '247459237+MichaelWave369@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(graph): report complete palace graph stats'
+          git push origin HEAD:fix/graph-stats-completeness
