@@ -23,6 +23,17 @@ if test_text.count(old) != 1:
     raise SystemExit(f"cache regression anchor: expected one match, found {test_text.count(old)}")
 test_path.write_text(test_text.replace(old, new, 1), encoding="utf-8")
 
+# `general` now counts as a real room on the sqlite fast path too, so the
+# existing wing-count assertion must include it. Keep the HNSW tripwires and
+# every other expectation unchanged.
+mcp_test_path = Path("tests/test_mcp_server.py")
+mcp_test_text = mcp_test_path.read_text(encoding="utf-8")
+old = '        assert stats["rooms_per_wing"] == {"wing_code": 2, "wing_project": 1}'
+new = '        assert stats["rooms_per_wing"] == {"wing_code": 3, "wing_project": 1}'
+if mcp_test_text.count(old) != 1:
+    raise SystemExit(f"sqlite wing-count anchor: expected one match, found {mcp_test_text.count(old)}")
+mcp_test_path.write_text(mcp_test_text.replace(old, new, 1), encoding="utf-8")
+
 feature_files = [
     "mempalace/palace_graph.py",
     "mempalace/mcp_server.py",
