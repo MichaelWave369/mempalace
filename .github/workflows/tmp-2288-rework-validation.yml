@@ -18,31 +18,24 @@ jobs:
         with:
           ref: fix/graph-stats-completeness
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install project and dev dependencies
-        run: python -m pip install -e '.[dev]'
-
+      - run: python -m pip install -e '.[dev]'
       - name: Apply reviewed #2288 rework
         run: |
           python - <<'PY'
           from pathlib import Path
-
           palace = Path('mempalace/palace_graph.py')
           text = palace.read_text(encoding='utf-8')
           if '``total_room_instances`` counts distinct (wing, room)' not in text:
-              if text.count('if not room or room == "general" or not wing:') != 1:
-                  raise SystemExit('palace_graph grouped-row general filter anchor changed')
+              assert text.count('if not room or room == "general" or not wing:') == 1
               text = text.replace('if not room or room == "general" or not wing:', 'if not room or not wing:', 1)
-              if text.count('if room and room != "general" and wing:') != 1:
-                  raise SystemExit('palace_graph client general filter anchor changed')
+              assert text.count('if room and room != "general" and wing:') == 1
               text = text.replace('if room and room != "general" and wing:', 'if room and wing:', 1)
               start = text.index('def graph_stats(col=None, config=None):')
               end = text.index('\n\ndef _fuzzy_match(', start)
-              new_stats = '''def graph_stats(col=None, config=None):
+              text = text[:start] + '''def graph_stats(col=None, config=None):
     """Summary statistics about the palace graph.
 
     ``total_rooms`` keeps its historical meaning: unique room-name nodes in
@@ -52,7 +45,6 @@ jobs:
     silently omit agent-created graph connections.
     """
     nodes, edges = build_graph(col, config)
-
     passive_tunnel_rooms = sum(1 for n in nodes.values() if len(n["wings"]) >= 2)
     total_room_instances = sum(len(n["wings"]) for n in nodes.values())
     explicit_tunnel_count = len(_load_tunnels(config))
@@ -60,7 +52,6 @@ jobs:
     for data in nodes.values():
         for w in data["wings"]:
             wing_counts[w] += 1
-
     return {
         "total_rooms": len(nodes),
         "total_room_instances": total_room_instances,
@@ -76,26 +67,19 @@ jobs:
             if len(d["wings"]) >= 2
         ],
     }
-'''
-              text = text[:start] + new_stats + text[end:]
+''' + text[end:]
               palace.write_text(text, encoding='utf-8')
 
           mcp = Path('mempalace/mcp_server.py')
           text = mcp.read_text(encoding='utf-8')
           if 'room_instances = set()' not in text:
-              import_anchor = '    delete_tunnel,\n    follow_tunnels,\n)'
-              import_new = '    delete_tunnel,\n    follow_tunnels,\n    _load_tunnels as _load_graph_tunnels,\n)'
-              if text.count(import_anchor) != 1:
-                  raise SystemExit('mcp_server palace_graph import anchor changed')
-              text = text.replace(import_anchor, import_new, 1)
-              text = text.replace(
-                  'wing and a usable room name (the catch-all ``"general"`` is excluded), and\n',
-                  'wing and a usable room name (including the catch-all ``"general"``), and\n',
-                  1,
-              )
+              anchor = '    delete_tunnel,\n    follow_tunnels,\n)'
+              assert text.count(anchor) == 1
+              text = text.replace(anchor, '    delete_tunnel,\n    follow_tunnels,\n    _load_tunnels as _load_graph_tunnels,\n)', 1)
+              text = text.replace('wing and a usable room name (the catch-all ``"general"`` is excluded), and\n', 'wing and a usable room name (including the catch-all ``"general"``), and\n', 1)
               start = text.index('def _graph_stats_from_grouped_rows(rows):')
               end = text.index('\n\ndef _graph_sqlite_reader()', start)
-              new_grouped_stats = '''def _graph_stats_from_grouped_rows(rows):
+              text = text[:start] + '''def _graph_stats_from_grouped_rows(rows):
     """Rebuild ``graph_stats`` from grouped sqlite metadata rows.
 
     Rows are ``(room, wing, hall, n)`` with an optional fifth ``last_date``
@@ -119,7 +103,6 @@ jobs:
         if hall:
             node["halls"].add(str(hall))
         node["count"] += int(n)
-
     passive_tunnel_rooms = 0
     total_edges = 0
     wing_counts = Counter()
@@ -130,12 +113,9 @@ jobs:
         if n_wings >= 2:
             passive_tunnel_rooms += 1
             total_edges += (n_wings * (n_wings - 1) // 2) * len(data["halls"])
-
     top_tunnels = [
         {"room": room, "wings": sorted(data["wings"]), "count": data["count"]}
-        for room, data in sorted(room_data.items(), key=lambda kv: (-len(kv[1]["wings"]), kv[0]))[
-            :10
-        ]
+        for room, data in sorted(room_data.items(), key=lambda kv: (-len(kv[1]["wings"]), kv[0]))[:10]
         if len(data["wings"]) >= 2
     ]
     explicit_tunnel_count = len(_load_graph_tunnels(_config))
@@ -150,59 +130,44 @@ jobs:
         "rooms_per_wing": dict(wing_counts.most_common()),
         "top_tunnels": top_tunnels,
     }
-'''
-              text = text[:start] + new_grouped_stats + text[end:]
+''' + text[end:]
               mcp.write_text(text, encoding='utf-8')
 
-          tests = Path('tests/test_palace_graph.py')
-          text = tests.read_text(encoding='utf-8')
-          old_general = '''    def test_general_room_excluded(self):\n        col = _make_fake_collection(\n            [\n                {"room": "general", "wing": "wing_code", "hall": "misc", "date": ""},\n            ]\n        )\n        nodes, edges = build_graph(col=col)\n        assert "general" not in nodes\n'''
-          new_general = '''    def test_general_room_included(self):\n        col = _make_fake_collection(\n            [\n                {"room": "general", "wing": "wing_code", "hall": "misc", "date": ""},\n            ]\n        )\n        nodes, edges = build_graph(col=col)\n        assert "general" in nodes\n        assert nodes["general"]["wings"] == ["wing_code"]\n'''
-          if 'def test_general_room_included(self):' not in text:
-              if text.count(old_general) != 1:
-                  raise SystemExit('test_palace_graph general test anchor changed')
-              text = text.replace(old_general, new_general, 1)
-          marker = '# --- grouped sqlite graph regressions (#2260 / #2288) ---'
-          if marker not in text:
-              text += '''\n\n# --- grouped sqlite graph regressions (#2260 / #2288) ---\n\n\ndef test_grouped_rows_include_general_across_wings_and_halls():\n    from mempalace.palace_graph import _nodes_edges_from_grouped_rows\n\n    nodes, edges = _nodes_edges_from_grouped_rows(\n        [\n            ("general", "wing_a", "hall_one", 2, "2026-01-01"),\n            ("general", "wing_a", "hall_two", 3, "2026-01-02"),\n            ("general", "wing_b", "hall_one", 1, "2026-01-03"),\n        ]\n    )\n    assert nodes["general"]["wings"] == ["wing_a", "wing_b"]\n    assert nodes["general"]["halls"] == ["hall_one", "hall_two"]\n    assert nodes["general"]["count"] == 6\n    assert len(edges) == 2\n\n\ndef test_graph_stats_include_general_room_instances_and_explicit_tunnels():\n    col = _make_fake_collection(\n        [\n            {"room": "fact", "wing": "desercion"},\n            {"room": "general", "wing": "desercion-pascual"},\n            {"room": "general", "wing": "desertion"},\n            {"room": "heatstgnn-model-selection", "wing": "desertion"},\n            {"room": "diary", "wing": "desertion"},\n            {"room": "general", "wing": "matlab-drive"},\n            {"room": "documentation", "wing": "octopus"},\n            {"room": "plans", "wing": "octopus"},\n            {"room": "controller", "wing": "octopus"},\n        ]\n    )\n    with patch.dict(\n        graph_stats.__globals__,\n        {"_load_tunnels": lambda config=None: [{"id": "t1"}, {"id": "t2"}]},\n    ):\n        stats = graph_stats(col=col)\n    assert stats["total_rooms"] == 7\n    assert stats["total_room_instances"] == 9\n    assert stats["tunnel_rooms"] == 1\n    assert stats["passive_tunnel_rooms"] == 1\n    assert stats["explicit_tunnels"] == 2\n    assert stats["total_connections"] == stats["total_edges"] + 2\n    assert set(stats["rooms_per_wing"]) == {\n        "desercion", "desercion-pascual", "desertion", "matlab-drive", "octopus"\n    }\n    assert stats["rooms_per_wing"]["desertion"] == 3\n    assert stats["rooms_per_wing"]["octopus"] == 3\n'''
-              tests.write_text(text, encoding='utf-8')
+          t = Path('tests/test_palace_graph.py')
+          text = t.read_text(encoding='utf-8')
+          old = '''    def test_general_room_excluded(self):\n        col = _make_fake_collection(\n            [\n                {"room": "general", "wing": "wing_code", "hall": "misc", "date": ""},\n            ]\n        )\n        nodes, edges = build_graph(col=col)\n        assert "general" not in nodes\n'''
+          new = '''    def test_general_room_included(self):\n        col = _make_fake_collection(\n            [\n                {"room": "general", "wing": "wing_code", "hall": "misc", "date": ""},\n            ]\n        )\n        nodes, edges = build_graph(col=col)\n        assert "general" in nodes\n        assert nodes["general"]["wings"] == ["wing_code"]\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          if '# --- grouped sqlite graph regressions (#2260 / #2288) ---' not in text:
+              text += '''\n\n# --- grouped sqlite graph regressions (#2260 / #2288) ---\n\ndef test_grouped_rows_include_general_across_wings_and_halls():\n    from mempalace.palace_graph import _nodes_edges_from_grouped_rows\n    nodes, edges = _nodes_edges_from_grouped_rows([\n        ("general", "wing_a", "hall_one", 2, "2026-01-01"),\n        ("general", "wing_a", "hall_two", 3, "2026-01-02"),\n        ("general", "wing_b", "hall_one", 1, "2026-01-03"),\n    ])\n    assert nodes["general"]["wings"] == ["wing_a", "wing_b"]\n    assert nodes["general"]["halls"] == ["hall_one", "hall_two"]\n    assert nodes["general"]["count"] == 6\n    assert len(edges) == 2\n\ndef test_graph_stats_include_general_room_instances_and_explicit_tunnels():\n    col = _make_fake_collection([\n        {"room": "fact", "wing": "desercion"},\n        {"room": "general", "wing": "desercion-pascual"},\n        {"room": "general", "wing": "desertion"},\n        {"room": "heatstgnn-model-selection", "wing": "desertion"},\n        {"room": "diary", "wing": "desertion"},\n        {"room": "general", "wing": "matlab-drive"},\n        {"room": "documentation", "wing": "octopus"},\n        {"room": "plans", "wing": "octopus"},\n        {"room": "controller", "wing": "octopus"},\n    ])\n    with patch.dict(graph_stats.__globals__, {"_load_tunnels": lambda config=None: [{"id": "t1"}, {"id": "t2"}]}):\n        stats = graph_stats(col=col)\n    assert stats["total_rooms"] == 7\n    assert stats["total_room_instances"] == 9\n    assert stats["tunnel_rooms"] == stats["passive_tunnel_rooms"] == 1\n    assert stats["explicit_tunnels"] == 2\n    assert stats["total_connections"] == stats["total_edges"] + 2\n    assert set(stats["rooms_per_wing"]) == {"desercion", "desercion-pascual", "desertion", "matlab-drive", "octopus"}\n'''
+              t.write_text(text, encoding='utf-8')
 
-          mcp_tests = Path('tests/test_mcp_server.py')
-          text = mcp_tests.read_text(encoding='utf-8')
-          old_expect = '''        # "general" room and the wing-less drawer are excluded, matching\n        # build_graph's per-drawer filter.\n        assert stats["total_rooms"] == 2\n        assert stats["tunnel_rooms"] == 1\n        assert stats["total_edges"] == 1\n'''
-          new_expect = '''        # "general" is a real room; the wing-less drawer is still excluded.\n        # The tripwires above guarantee this stays off the collection/HNSW path.\n        assert stats["total_rooms"] == 3\n        assert stats["tunnel_rooms"] == 1\n        assert stats["total_edges"] == 1\n'''
-          if old_expect in text:
-              text = text.replace(old_expect, new_expect, 1)
-          elif new_expect not in text:
-              raise SystemExit('test_mcp_server fast-path expectation anchor changed')
-          marker = '# --- #2288 grouped graph_stats regression ---'
-          if marker not in text:
-              text += '''\n\n# --- #2288 grouped graph_stats regression ---\n\n\ndef test_graph_stats_grouped_rows_include_general_and_distinct_room_instances(monkeypatch):\n    from mempalace import mcp_server\n\n    monkeypatch.setattr(\n        mcp_server, "_load_graph_tunnels", lambda config=None: [{"id": "t1"}, {"id": "t2"}]\n    )\n    rows = [\n        ("fact", "desercion", "facts", 1, "2026-01-01"),\n        ("general", "desercion-pascual", "misc", 1, "2026-01-01"),\n        ("general", "desertion", "misc", 2, "2026-01-02"),\n        ("general", "desertion", "other", 3, "2026-01-03"),\n        ("heatstgnn-model-selection", "desertion", "models", 1, "2026-01-01"),\n        ("diary", "desertion", "journal", 1, "2026-01-01"),\n        ("general", "matlab-drive", "misc", 1, "2026-01-01"),\n        ("documentation", "octopus", "docs", 1, "2026-01-01"),\n        ("plans", "octopus", "plans", 1, "2026-01-01"),\n        ("controller", "octopus", "control", 1, "2026-01-01"),\n    ]\n    stats = mcp_server._graph_stats_from_grouped_rows(rows)\n    assert stats["total_rooms"] == 7\n    assert stats["total_room_instances"] == 9\n    assert stats["tunnel_rooms"] == 1\n    assert stats["passive_tunnel_rooms"] == 1\n    assert stats["explicit_tunnels"] == 2\n    assert stats["total_connections"] == stats["total_edges"] + 2\n    assert set(stats["rooms_per_wing"]) == {\n        "desercion", "desercion-pascual", "desertion", "matlab-drive", "octopus"\n    }\n    assert stats["rooms_per_wing"]["desertion"] == 3\n    assert stats["rooms_per_wing"]["octopus"] == 3\n'''
-              mcp_tests.write_text(text, encoding='utf-8')
+          t = Path('tests/test_mcp_server.py')
+          text = t.read_text(encoding='utf-8')
+          old = '''        # "general" room and the wing-less drawer are excluded, matching\n        # build_graph's per-drawer filter.\n        assert stats["total_rooms"] == 2\n        assert stats["tunnel_rooms"] == 1\n        assert stats["total_edges"] == 1\n'''
+          new = '''        # "general" is a real room; the wing-less drawer is still excluded.\n        # The tripwires above guarantee this stays off the collection/HNSW path.\n        assert stats["total_rooms"] == 3\n        assert stats["tunnel_rooms"] == 1\n        assert stats["total_edges"] == 1\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          if '# --- #2288 grouped graph_stats regression ---' not in text:
+              text += '''\n\n# --- #2288 grouped graph_stats regression ---\n\ndef test_graph_stats_grouped_rows_include_general_and_distinct_room_instances(monkeypatch):\n    from mempalace import mcp_server\n    monkeypatch.setattr(mcp_server, "_load_graph_tunnels", lambda config=None: [{"id": "t1"}, {"id": "t2"}])\n    rows = [\n        ("fact", "desercion", "facts", 1, "2026-01-01"),\n        ("general", "desercion-pascual", "misc", 1, "2026-01-01"),\n        ("general", "desertion", "misc", 2, "2026-01-02"),\n        ("general", "desertion", "other", 3, "2026-01-03"),\n        ("heatstgnn-model-selection", "desertion", "models", 1, "2026-01-01"),\n        ("diary", "desertion", "journal", 1, "2026-01-01"),\n        ("general", "matlab-drive", "misc", 1, "2026-01-01"),\n        ("documentation", "octopus", "docs", 1, "2026-01-01"),\n        ("plans", "octopus", "plans", 1, "2026-01-01"),\n        ("controller", "octopus", "control", 1, "2026-01-01"),\n    ]\n    stats = mcp_server._graph_stats_from_grouped_rows(rows)\n    assert stats["total_rooms"] == 7\n    assert stats["total_room_instances"] == 9\n    assert stats["tunnel_rooms"] == stats["passive_tunnel_rooms"] == 1\n    assert stats["explicit_tunnels"] == 2\n    assert stats["total_connections"] == stats["total_edges"] + 2\n    assert set(stats["rooms_per_wing"]) == {"desercion", "desercion-pascual", "desertion", "matlab-drive", "octopus"}\n'''
+              t.write_text(text, encoding='utf-8')
           PY
-
-      - name: Format touched files
-        run: ruff format mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
-
-      - name: Run graph and fast-path regression suites
+      - run: ruff format mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
+      - name: Tests
         run: |
           python -m pytest -q tests/test_palace_graph.py tests/test_palace_graph_tunnels.py
           python -m pytest -q tests/test_mcp_server.py -k 'graph_stats or tunnel'
-
-      - name: Lint and compile
+      - name: Lint
         run: |
           ruff check mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
           ruff format --check mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
           python -m compileall -q mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
-
       - name: Commit validated rework
         run: |
-          if git diff --quiet; then
-            echo 'Validated tree already committed.'
-            exit 0
-          fi
           git config user.name 'MichaelWave369'
           git config user.email '247459237+MichaelWave369@users.noreply.github.com'
           git add mempalace/palace_graph.py mempalace/mcp_server.py tests/test_palace_graph.py tests/test_mcp_server.py
+          git diff --cached --quiet && exit 0
           git commit -m 'fix(graph): report complete palace graph stats'
           git push --force-with-lease origin HEAD:fix/graph-stats-completeness
