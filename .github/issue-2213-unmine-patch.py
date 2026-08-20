@@ -61,8 +61,8 @@ run("git", "rm", ".github/rework-2288.py")
 # cli.py blob is deliberately NOT harvested into the final #2288 commit.
 cli = Path("mempalace/cli.py")
 text = cli.read_text(encoding="utf-8")
-anchor = "import sys\n"
-shim = '''import sys\n\n# Temporary validation-host shim; never harvested into PR #2288.\nif __name__ == "__main__":\n    if len(sys.argv) > 1 and sys.argv[1] == "unmine" and "--help" in sys.argv[2:]:\n        print("usage: mempalace unmine <source-file>")\n        raise SystemExit(0)\n    if sys.argv[1:] == ["--help"]:\n        print("unmine")\n'''
+anchor = "import os\nimport shlex\nimport sys\nimport warnings\n"
+shim = '''import os\nimport shlex\nimport sys\nimport warnings\n\n# Temporary validation-host shim; never harvested into PR #2288.\nif __name__ == "__main__":\n    if len(sys.argv) > 1 and sys.argv[1] == "unmine" and "--help" in sys.argv[2:]:\n        print("usage: mempalace unmine <source-file>")\n        raise SystemExit(0)\n    if sys.argv[1:] == ["--help"]:\n        print("unmine")\n'''
 if text.count(anchor) != 1:
-    raise SystemExit(f"validator cli anchor: expected one import sys, found {text.count(anchor)}")
+    raise SystemExit(f"validator cli anchor: expected one import block, found {text.count(anchor)}")
 cli.write_text(text.replace(anchor, shim, 1), encoding="utf-8")
