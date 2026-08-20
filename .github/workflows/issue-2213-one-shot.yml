@@ -1,0 +1,56 @@
+name: Validate issue 2213 unmine repair
+
+on:
+  push:
+    branches:
+      - fix/unmine-source-2213
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/unmine-source-2213
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Apply issue 2213 patch
+        run: python .github/issue-2213-unmine-patch.py
+
+      - name: Format
+        run: ruff format mempalace/sync.py mempalace/cli.py tests/test_sync.py
+
+      - name: Focused sync/unmine tests
+        run: python -m pytest -q tests/test_sync.py
+
+      - name: CLI smoke
+        run: |
+          python -m mempalace.cli unmine --help
+          python -m mempalace.cli --help | grep -q unmine
+
+      - name: Lint and compile
+        run: |
+          ruff check mempalace/sync.py mempalace/cli.py tests/test_sync.py
+          ruff format --check mempalace/sync.py mempalace/cli.py tests/test_sync.py
+          python -m compileall -q mempalace/sync.py mempalace/cli.py tests/test_sync.py
+
+      - name: Commit validated patch and remove one-shot harness
+        run: |
+          git config user.name 'Michael Hughes'
+          git config user.email 'microneesia79@gmail.com'
+          git rm .github/workflows/issue-2213-one-shot.yml .github/issue-2213-unmine-patch.py
+          git add mempalace/sync.py mempalace/cli.py tests/test_sync.py
+          git commit -m 'fix(cli): add source-scoped unmine command'
+          git push origin HEAD:fix/unmine-source-2213
